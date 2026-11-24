@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#0a0f1e">
+    <title>لوحة التعديل</title>
+    <script src="firebase-config.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #0a0f1e; color: #eef2ff; font-family: system-ui, -apple-system, "Segoe UI", Tahoma, Arial, sans-serif; line-height: 1.5; }
+        main { max-width: 640px; margin: 0 auto; padding: 16px 14px 60px; }
+        header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+        h1 { font-size: 20px; margin: 0; }
+        h2 { font-size: 15px; margin: 0 0 10px; color: #c7d2fe; }
+        .card { background: #111830; border: 1px solid #26335c; border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+        label { display: block; font-size: 12px; color: #8f9bbd; margin: 8px 0 4px; }
+        input[type=text], input[type=password], textarea, select {
+            width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid #26335c; background: #0d1429;
+            color: #eef2ff; font: inherit; font-size: 15px;
+        }
+        textarea { min-height: 70px; resize: vertical; }
+        input:focus, textarea:focus, select:focus { outline: 2px solid #4f8cff; border-color: #4f8cff; }
+        button, .btn {
+            display: inline-block; border: 0; border-radius: 10px; padding: 11px 16px; font: inherit; font-weight: 700;
+            background: #4f8cff; color: #fff; cursor: pointer; text-decoration: none; text-align: center;
+        }
+        button.alt, .btn.alt { background: #19234a; color: #c7d2fe; }
+        button.small { padding: 8px 12px; font-size: 13px; }
+        button:disabled { opacity: .5; cursor: default; }
+        .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+        .row > input { flex: 1; }
+        .row > .lb { flex: .6; }
+        .bar { display: flex; gap: 10px; position: sticky; bottom: 0; padding: 10px 0; background: linear-gradient(transparent, #0a0f1e 30%); }
+        .bar > * { flex: 1; }
+        .check { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; color: #eef2ff; }
+        .check input { width: 20px; height: 20px; }
+        .item { border-top: 1px solid #26335c; padding-top: 10px; margin-top: 10px; }
+        .item:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+        .name { font-weight: 700; }
+        .muted { color: #8f9bbd; font-size: 13px; }
+        #msg { min-height: 24px; font-size: 14px; margin: 6px 0; }
+        #msg.err { color: #ff8a8a; }
+        #msg.ok { color: #38d39f; }
+        [hidden] { display: none !important; }
+        .ltr { direction: ltr; text-align: left; }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <h1 id="title">لوحة التعديل</h1>
+        <button id="logout" class="alt small" hidden>خروج</button>
+    </header>
+
+    <section id="login" class="card" hidden>
+        <h2>تسجيل الدخول</h2>
+        <label for="user">اسم المستخدم</label>
+        <input id="user" type="text" class="ltr" autocomplete="username" autocapitalize="none" spellcheck="false">
+        <label for="pass">كلمة السر</label>
+        <input id="pass" type="password" class="ltr" autocomplete="current-password">
+        <div class="row"><button id="loginBtn" style="flex:1">دخول</button></div>
+    </section>
+
+    <section id="app" hidden>
+        <div class="card" id="pickWrap" hidden>
+            <label for="pick">الصفحة</label>
+            <select id="pick"></select>
+        </div>
+        <div id="form"></div>
+        <div class="bar">
+            <button id="save">حفظ التغييرات</button>
+            <a id="open" class="btn alt" target="_blank" rel="noopener">فتح الصفحة</a>
+        </div>
+    </section>
+
+    <p id="msg" role="status"></p>
+</main>
+
+<script>
+(function () {
+    "use strict";
+
+    /* ---------------------------------------------------------------- settings */
+    var CFG = window.FB_CONFIG || {};
+    var DOMAIN = CFG.emailDomain || "clients.fennecsys.app";
+    var SESSION_KEY = "fb_client_session";
+    var MAX_VALUES = 10;
+    var MAX_TEXT = 400;
+    var MAX_ADDED = 20;
+    var MAX_ENTRIES = 60;
+
+    var PLATFORM = {
+        f: "Facebook", d: "Discord", i: "Instagram", l: "LinkedIn", lc: "الموقع على الخريطة", p: "Pinterest",
+        s: "Snapchat", t: "TikTok", tl: "Telegram", w: "WhatsApp", wb: "موقع ويب", x: "X", y: "YouTube",
+        e: "البريد الإلكتروني", tp: "الهاتف"
+    };
+    var TEMPLATES = {
+        f: "facebook.com/{}", i: "instagram.com/{}", l: "linkedin.com/in/{}", p: "pinterest.com/{}",
+        s: "snapchat.com/add/{}", t: "tiktok.com/@{}", tl: "t.me/{}", x: "x.com/{}", y: "youtube.com/@{}", d: "discord.gg/{}"
+    };
+    var HOSTS = {
+        f: ["facebook.com", "fb.com", "fb.me"], i: ["instagram.com", "instagr.am"], l: ["linkedin.com"],
+        p: ["pinterest.com", "pin.it"], s: ["snapchat.com"], t: ["tiktok.com"],
+        tl: ["t.me", "telegram.me", "telegram.dog"], x: ["x.com", "twitter.com"],
+        y: ["youtube.com", "youtu.be"], d: ["discord.gg", "discord.com"]
+    };
+
+    var $ = function (id) { return document.getElementById(id); };
+    var S = { auth: null, pages: [], page: null, base: null, content: {}, collectors: [] };
+
+    /* ---------------------------------------------------------------- small helpers */
+    function isObj(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+    function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+    function say(text, kind) {
+        var m = $("msg");
+        m.textContent = text || "";
+        m.className = kind || "";
+    }
+
+    function el(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text != null) n.textContent = text;
+        return n;
+    }
+
+    // ---- bilingual texts: "plain" or {"ar": "...", "en": "..."}
+    function parts(v) {
+        if (isObj(v)) return [String(v.ar || ""), String(v.en || "")];
+        return [typeof v === "string" ? v : "", ""];
+    }
+    function bi(ar, en) {
+        ar = (ar || "").trim().slice(0, MAX_TEXT);
+        en = (en || "").trim().slice(0, MAX_TEXT);
+        return ar && en ? { ar: ar, en: en } : (ar || en);
+    }
+    function norm(v) { var p = parts(v); return bi(p[0], p[1]); }
+    function same(a, b) { return JSON.stringify(norm(a)) === JSON.stringify(norm(b)); }
+
+    /* ---------------------------------------------------------------- Firestore value <-> JS */
+    function fsDecode(v) {
+        if (!isObj(v)) return null;
+        if ("stringValue" in v) return v.stringValue;
+        if ("integerValue" in v) return Number(v.integerValue);
+        if ("doubleValue" in v) return Number(v.doubleValue);
+        if ("booleanValue" in v) return !!v.booleanValue;
+        if ("mapValue" in v) {
+            var out = {}, f = (v.mapValue && v.mapValue.fields) || {};
+            Object.keys(f).forEach(function (k) { if (k !== "__proto__") out[k] = fsDecode(f[k]); });
+            return out;
+        }
+        if ("arrayValue" in v) return ((v.arrayValue && v.arrayValue.values) || []).map(fsDecode);
+        return null;
+    }
+    function fsEncode(v) {
+        if (typeof v === "boolean") return { booleanValue: v };
+        if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+        if (typeof v === "string") return { stringValue: v };
+        if (Array.isArray(v)) return v.length ? { arrayValue: { values: v.map(fsEncode) } } : { arrayValue: {} };
+        if (isObj(v)) {
+            var keys = Object.keys(v);
+            if (!keys.length) return { mapValue: {} };
+            var fields = {};
+            keys.forEach(function (k) { fields[k] = fsEncode(v[k]); });
+            return { mapValue: { fields: fields } };
+        }
+        return { nullValue: null };
+    }
+
+    /* ---------------------------------------------------------------- network */
+    var ERRORS = {
+        INVALID_LOGIN_CREDENTIALS: "اسم المستخدم أو كلمة السر غير صحيحة.",
+        EMAIL_NOT_FOUND: "اسم المستخدم أو كلمة السر غير صحيحة.",
+        INVALID_PASSWORD: "اسم المستخدم أو كلمة السر غير صحيحة.",
+        INVALID_EMAIL: "اسم المستخدم غير صالح.",
+        USER_DISABLED: "هذا الحساب موقوف.",
+        TOO_MANY_ATTEMPTS_TRY_LATER: "محاولات كثيرة. انتظر قليلًا ثم أعد المحاولة.",
+        PERMISSION_DENIED: "ليس لديك صلاحية لهذا التعديل."
+    };
+
+    function request(url, options) {
+        return fetch(url, options).then(function (res) {
+            return res.text().then(function (body) {
+                var data = null;
+                try { data = body ? JSON.parse(body) : null; } catch (e) { data = null; }
+                if (!res.ok) {
+                    var code = (data && data.error && (data.error.message || data.error.status)) || ("HTTP " + res.status);
+                    var key = String(code).split(" ")[0];
+                    var err = new Error(ERRORS[key] || ("تعذّر تنفيذ الطلب (" + key + ")."));
+                    err.code = key;
+                    throw err;
+                }
+                return data;
+            });
+        }, function () {
+            throw new Error("لا يوجد اتصال بالإنترنت.");
+        });
+    }
+
+    function configured() { return !!(CFG.projectId && CFG.apiKey); }
+    function emailOf(user) { return user + "@" + DOMAIN; }
+
+    function saveSession() {
+        try {
+            if (S.auth) localStorage.setItem(SESSION_KEY, JSON.stringify({ r: S.auth.refreshToken, u: S.auth.user }));
+            else localStorage.removeItem(SESSION_KEY);
+        } catch (e) { /* storage may be blocked: the client simply logs in again next time */ }
+    }
+
+    function useTokens(idToken, refreshToken, uid, expiresIn, user) {
+        S.auth = {
+            idToken: idToken, refreshToken: refreshToken, uid: uid, user: user,
+            expiresAt: Date.now() + (Number(expiresIn) || 3600) * 1000
+        };
+        saveSession();
+    }
+
+    function signIn(user, password) {
+        return request("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(CFG.apiKey), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: emailOf(user), password: password, returnSecureToken: true })
+        }).then(function (d) { useTokens(d.idToken, d.refreshToken, d.localId, d.expiresIn, user); });
+    }
+
+    function refreshSession(refreshToken, user) {
+        return request("https://securetoken.googleapis.com/v1/token?key=" + encodeURIComponent(CFG.apiKey), {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "grant_type=refresh_token&refresh_token=" + encodeURIComponent(refreshToken)
+        }).then(function (d) { useTokens(d.id_token, d.refresh_token, d.user_id, d.expires_in, user); });
+    }
+
+    function token() {
+        if (!S.auth) return Promise.reject(new Error("سجّل الدخول من جديد."));
+        if (Date.now() < S.auth.expiresAt - 60000) return Promise.resolve(S.auth.idToken);
+        return refreshSession(S.auth.refreshToken, S.auth.user).then(function () { return S.auth.idToken; });
+    }
+
+    function docsUrl() { return "https://firestore.googleapis.com/v1/projects/" + encodeURIComponent(CFG.projectId) + "/databases/(default)/documents"; }
+
+    function authed(url, options) {
+        return token().then(function (t) {
+            options = options || {};
+            options.headers = Object.assign({ "Content-Type": "application/json", "Authorization": "Bearer " + t }, options.headers || {});
+            return request(url, options);
+        });
+    }
+
+    function loadMyPages() {
+        var query = {
+            structuredQuery: {
+                from: [{ collectionId: "pages" }],
+                where: { fieldFilter: { field: { fieldPath: "owner" }, op: "EQUAL", value: { stringValue: S.auth.uid } } },
+                limit: 20
+            }
+        };
+        return authed(docsUrl() + ":runQuery", { method: "POST", body: JSON.stringify(query) }).then(function (rows) {
+            var pages = [];
+            (Array.isArray(rows) ? rows : []).forEach(function (row) {
+                if (!row || !row.document) return;
+                var f = row.document.fields || {};
+                pages.push({
+                    id: row.document.name.split("/").pop(),
+                    perm: fsDecode(f.perm) || {},
+                    content: fsDecode(f.content) || {}
+                });
+            });
+            return pages;
+        });
+    }
+
+    function saveContent(id, content) {
+        return authed(docsUrl() + "/pages/" + encodeURIComponent(id) + "?updateMask.fieldPaths=content", {
+            method: "PATCH", body: JSON.stringify({ fields: { content: fsEncode(content) } })
+        });
+    }
+
+    function loadBase(id) {
+        return fetch("items/" + encodeURIComponent(id) + ".json", { cache: "no-cache" }).then(function (res) {
+            if (!res.ok) throw new Error("تعذّر تحميل الصفحة.");
+            return res.json();
+        });
+    }
+
+    /* ---------------------------------------------------------------- links (same rules as the QR app) */
+    function buildLink(pid, raw) {
+        var text = String(raw || "").trim();
+        var m, d;
+        if (pid === "e") {
+            text = text.replace(/^mailto:/i, "").trim();
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)) throw new Error("بريد إلكتروني غير صالح.");
+            return text;
+        }
+        if (pid === "tp") {
+            var r = text.replace(/^tel:/i, "").trim();
+            d = r.replace(/\D/g, "");
+            if (d.indexOf("00") === 0) d = d.slice(2);
+            else if (d.charAt(0) === "0" && r.charAt(0) !== "+") throw new Error("استعمل الصيغة الدولية، مثل +213...");
+            if (d.length < 6) throw new Error("رقم هاتف غير صالح.");
+            return "+" + d;
+        }
+        text = text.replace(/^https?:\/\/(www\.)?/i, "");
+        if (pid === "w") {
+            if (/wa\.me/i.test(text)) return text;
+            d = text.replace(/\D/g, "");
+            if (d.indexOf("00") === 0) d = d.slice(2);
+            else if (d.charAt(0) === "0") throw new Error("استعمل الصيغة الدولية، مثل 213...");
+            if (d.length < 6) throw new Error("رقم واتساب غير صالح.");
+            return "wa.me/" + d;
+        }
+        if (pid === "lc") {
+            m = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+            if (m) return "google.com/maps?q=" + m[1] + "," + m[2];
+            if (text.indexOf(".") > -1) return text;
+            throw new Error("أدخل إحداثيات أو رابط خريطة.");
+        }
+        if (TEMPLATES[pid]) {
+            var hostRe = new RegExp("^(?:(?:www|m|web|mobile|mbasic)\\.)?(?:" + HOSTS[pid].map(esc).join("|") + ")(?:/|$|\\?)", "i");
+            if (hostRe.test(text)) {
+                text = text.replace(/^(?:www|m|web|mobile|mbasic)\./i, "").split("#")[0].replace(/\/$/, "");
+                if (text.indexOf("/") < 0) throw new Error("أضف اسم المستخدم بعد العنوان.");
+                return text;
+            }
+            var user = text.replace(/^@/, "").replace(/^\/+|\/+$/g, "");
+            if (/[\/?]/.test(user)) throw new Error("هذا ليس رابط " + PLATFORM[pid] + ".");
+            if (!user || /\s/.test(user)) throw new Error("اسم مستخدم غير صالح.");
+            return TEMPLATES[pid].replace("{}", encodeURIComponent(user));
+        }
+        if (text.indexOf(".") > -1 || text.indexOf("/") > -1) return text;
+        throw new Error("أدخل رابطًا صالحًا.");
+    }
+
+    /* ---------------------------------------------------------------- form building */
+    // content[...] value if the client already changed it, otherwise the page's own value
+    function current(content, path, fallback) {
+        var node = content;
+        for (var i = 0; i < path.length; i++) {
+            if (!isObj(node) || !(path[i] in node)) return fallback;
+            node = node[path[i]];
+        }
+        return node;
+    }
+
+    function ensure(out, path) {
+        var node = out;
+        path.forEach(function (key) {
+            if (!isObj(node[key])) node[key] = {};
+            node = node[key];
+        });
+        return node;
+    }
+
+    function addTextInput(parent, label, value, multi, ltr) {
+        parent.appendChild(el("label", "", label));
+        var input = el(multi ? "textarea" : "input");
+        if (!multi) input.type = "text";
+        if (ltr) input.className = "ltr";
+        input.value = value;
+        input.maxLength = MAX_TEXT;
+        parent.appendChild(input);
+        return input;
+    }
+
+    // Arabic + English fields writing out[key] only when different from the page's own text
+    function biBlock(parent, label, key, multi) {
+        var base = S.base[key];
+        var cur = current(S.content, [key], base);
+        var p = parts(cur);
+        var ar = addTextInput(parent, label + " (عربي)", p[0], multi, false);
+        var en = addTextInput(parent, label + " (English)", p[1], multi, true);
+        S.collectors.push(function (out) {
+            var v = bi(ar.value, en.value);
+            if (!same(v, base)) out[key] = v;
+        });
+    }
+
+    function buildCommon(box) {
+        var perm = S.perm, isMenu = S.base.type === "menu";
+        if (perm.n || perm.tx || (isMenu && perm.mc)) {
+            var card = el("div", "card");
+            card.appendChild(el("h2", "", "المعلومات العامة"));
+            if (perm.n) biBlock(card, isMenu ? "اسم المحل" : "الاسم", "n", false);
+            if (perm.tx) {
+                biBlock(card, "السطر تحت الاسم", "h", false);
+                if (!isMenu) biBlock(card, "نص الترحيب (العنوان، أوقات العمل...)", "b", true);
+                biBlock(card, "النص أسفل الصفحة", "f", false);
+            }
+            if (isMenu && perm.mc) {
+                biBlock(card, "العملة بعد الأسعار", "cur", false);
+                ["ph", "wa"].forEach(function (key) {
+                    var label = key === "ph" ? "رقم الهاتف (اتصال)" : "رقم واتساب";
+                    var base = typeof S.base[key] === "string" ? S.base[key] : "";
+                    var cur = current(S.content, [key], base);
+                    var input = addTextInput(card, label + " — مثل +213 555 12 34 56", typeof cur === "string" ? cur : "", false, true);
+                    S.collectors.push(function (out) {
+                        var v = input.value.trim();
+                        if (v && !/^\+?[0-9 ]{5,20}$/.test(v)) throw new Error(label + ": أرقام فقط، مثل +213 555 12 34 56.");
+                        if (v !== base.trim()) out[key] = v;
+                    });
+                });
+            }
+            box.appendChild(card);
+        }
+    }
+
+    // one platform block. opts: pid, baseValues, baseLabels, values, labels, title, canEdit, canDelete, isNew, hidden
+    function linkBlock(opts) {
+        var pid = opts.pid;
+        var values = opts.values.slice(), labels = opts.labels.slice();
+        if (!values.length) values = [""];
+        var item = el("div", "item");
+        item.appendChild(el("div", "name", PLATFORM[pid] || pid));
+        var list = el("div");
+        item.appendChild(list);
+        var rows = [];
+        var editable = opts.canEdit || opts.isNew;
+
+        function sync() {
+            values = rows.map(function (r) { return r.value.value; });
+            labels = rows.map(function (r, n) { return r.label ? r.label.value : (labels[n] || ""); });
+        }
+        function render() {
+            list.innerHTML = "";
+            rows = [];
+            values.forEach(function (value, n) {
+                var row = el("div", "row");
+                var input = el("input", "ltr");
+                input.type = "text";
+                input.value = value;
+                input.maxLength = MAX_TEXT;
+                input.readOnly = !editable;
+                input.placeholder = TEMPLATES[pid] ? "@username أو الرابط" : "";
+                row.appendChild(input);
+                var lb = null;
+                if (values.length > 1) {
+                    lb = el("input", "lb");
+                    lb.type = "text";
+                    lb.placeholder = "اسم الزر";
+                    lb.value = labels[n] || "";
+                    lb.maxLength = 80;
+                    lb.readOnly = !editable;
+                    row.appendChild(lb);
+                    if (editable) {
+                        var del = el("button", "alt small", "×");
+                        del.type = "button";
+                        del.addEventListener("click", function () { sync(); values.splice(n, 1); labels.splice(n, 1); render(); });
+                        row.appendChild(del);
+                    }
+                }
+                list.appendChild(row);
+                rows.push({ value: input, label: lb });
+            });
+            if (editable && values.length < MAX_VALUES) {
+                var add = el("button", "alt small", "+ إضافة رابط آخر");
+                add.type = "button";
+                add.style.marginTop = "8px";
+                add.addEventListener("click", function () { sync(); values.push(""); labels.push(""); render(); });
+                list.appendChild(add);
+            }
+        }
+        render();
+
+        var hide = el("input");
+        hide.type = "checkbox";
+        hide.checked = !!opts.hidden;
+        if (opts.canDelete) {
+            var hideRow = el("label", "check");
+            hideRow.appendChild(hide);
+            hideRow.appendChild(document.createTextNode(opts.isNew ? "إلغاء هذه المنصة" : "حذف هذه المنصة من الصفحة"));
+            item.appendChild(hideRow);
+        }
+
+        var titleP = parts(opts.title);
+        var titleInput = null;
+        if (editable) titleInput = addTextInput(item, "الاسم المعروض (اختياري)", titleP[0] || titleP[1], false, false);
+
+        // returns the clean entry {v, lb, t} (or null when nothing to keep); throws on invalid links
+        item.read = function () {
+            sync();
+            var clean = [], cleanLabels = [];
+            try {
+                values.forEach(function (v, n) {
+                    v = String(v || "").trim();
+                    if (!v) return;
+                    clean.push(opts.baseValues.indexOf(v) > -1 ? v : buildLink(pid, v));
+                    cleanLabels.push((labels[n] || "").trim());
+                });
+            } catch (e) {
+                throw new Error((PLATFORM[pid] || pid) + ": " + e.message);
+            }
+            return {
+                hidden: opts.canDelete && hide.checked,
+                v: clean, lb: cleanLabels,
+                t: titleInput ? titleInput.value.trim() : null,
+                tChanged: titleInput ? titleInput.value.trim() !== (titleP[0] || titleP[1]).trim() : false
+            };
+        };
+        return item;
+    }
+
+    function buildLinks(box) {
+        var perm = S.perm;
+        if (!(perm.lk || perm.la)) return;
+        var entries = Array.isArray(S.base.l) ? S.base.l : [];
+        var card = el("div", "card");
+        card.appendChild(el("h2", "", "الروابط والمنصات"));
+        var any = false;
+
+        entries.forEach(function (entry, idx) {
+            if (!isObj(entry) || entry.i === "_h" || typeof entry.i !== "string") return;
+            any = true;
+            var pid = entry.i;
+            var baseValues = (Array.isArray(entry.v) ? entry.v : [entry.v]).filter(function (v) { return typeof v === "string" && v.trim(); });
+            var baseLabels = (Array.isArray(entry.lb) ? entry.lb : []).map(function (v) { var p = parts(v); return p[0] || p[1]; });
+            var saved = current(S.content, ["l", String(idx)], {});
+            if (!isObj(saved)) saved = {};
+            var item = linkBlock({
+                pid: pid, baseValues: baseValues, baseLabels: baseLabels,
+                values: Array.isArray(saved.v) ? saved.v.filter(function (v) { return typeof v === "string"; }) : baseValues,
+                labels: Array.isArray(saved.lb) ? saved.lb.map(function (v) { var p = parts(v); return p[0] || p[1]; }) : baseLabels,
+                title: "t" in saved ? saved.t : entry.t,
+                canEdit: !!perm.lk, canDelete: !!perm.la, isNew: false, hidden: !!saved.hide
+            });
+            card.appendChild(item);
+            S.collectors.push(function (out) {
+                var r = item.read();
+                if (r.hidden) { ensure(out, ["l"])[String(idx)] = { hide: 1 }; return; }
+                if (!perm.lk) return;
+                var o = {};
+                if (JSON.stringify(r.v) !== JSON.stringify(baseValues)) o.v = r.v;
+                if ((r.v.length > 1 && JSON.stringify(r.lb) !== JSON.stringify(baseLabels)) || (o.v && r.v.length > 1)) o.lb = r.lb;
+                if (r.tChanged) o.t = r.t;
+                if (Object.keys(o).length) ensure(out, ["l"])[String(idx)] = o;
+            });
+        });
+        if (!any && !perm.la) card.appendChild(el("p", "muted", "لا توجد روابط في هذه الصفحة."));
+
+        if (perm.la) {
+            var added = [];   // live blocks for new platforms
+            var addBox = el("div");
+            card.appendChild(addBox);
+            var addNew = function (pid, a) {
+                var blk = linkBlock({
+                    pid: pid, baseValues: [], baseLabels: [],
+                    values: a && Array.isArray(a.v) ? a.v.filter(function (v) { return typeof v === "string"; }) : [""],
+                    labels: a && Array.isArray(a.lb) ? a.lb.map(function (v) { var p = parts(v); return p[0] || p[1]; }) : [],
+                    title: a ? a.t : "", canEdit: true, canDelete: true, isNew: true, hidden: false
+                });
+                blk.pid = pid;
+                added.push(blk);
+                addBox.appendChild(blk);
+            };
+            (Array.isArray(S.content.add) ? S.content.add : []).forEach(function (a) {
+                if (isObj(a) && PLATFORM[a.i]) addNew(a.i, a);
+            });
+
+            var bar = el("div", "row");
+            bar.style.marginTop = "14px";
+            var sel = el("select");
+            sel.id = "newPlatform";
+            Object.keys(PLATFORM).forEach(function (k) {
+                var o = el("option", "", PLATFORM[k]);
+                o.value = k;
+                sel.appendChild(o);
+            });
+            var btn = el("button", "alt small", "+ إضافة منصة");
+            btn.type = "button";
+            btn.id = "addPlatform";
+            btn.addEventListener("click", function () {
+                var existing = entries.filter(function (e) { return isObj(e) && e.i !== "_h"; }).length;
+                if (added.length >= MAX_ADDED || existing + added.length >= MAX_ENTRIES) { say("وصلت إلى الحد الأقصى من المنصات.", "err"); return; }
+                addNew(sel.value, null);
+            });
+            bar.appendChild(sel);
+            bar.appendChild(btn);
+            card.appendChild(bar);
+
+            S.collectors.push(function (out) {
+                var list = [];
+                added.forEach(function (blk) {
+                    var r = blk.read();
+                    if (r.hidden || !r.v.length) return;
+                    var a = { i: blk.pid, v: r.v };
+                    if (r.v.length > 1) a.lb = r.lb;
+                    if (r.t) a.t = r.t;
+                    list.push(a);
+                });
+                if (list.length || "add" in S.content) out.add = list;
+            });
+        }
+        box.appendChild(card);
+    }
+
+    function buildMenu(box) {
+        var perm = S.perm;
+        if (!(perm.mp || perm.mn)) return;
+        var sections = Array.isArray(S.base.s) ? S.base.s : [];
+        sections.forEach(function (sec, si) {
+            if (!isObj(sec) || !Array.isArray(sec.i)) return;
+            var card = el("div", "card");
+            var secTitle = parts(current(S.content, ["s", String(si), "t"], sec.t));
+            if (perm.mn) {
+                card.appendChild(el("h2", "", "قسم " + (si + 1)));
+                var sAr = addTextInput(card, "عنوان القسم (عربي)", secTitle[0], false, false);
+                var sEn = addTextInput(card, "Section title (English)", secTitle[1], false, true);
+                S.collectors.push(function (out) {
+                    var v = bi(sAr.value, sEn.value);
+                    if (!same(v, sec.t || "")) ensure(out, ["s", String(si)]).t = v;
+                });
+            } else {
+                var p0 = parts(sec.t);
+                card.appendChild(el("h2", "", p0[0] || p0[1] || ("قسم " + (si + 1))));
+            }
+
+            sec.i.forEach(function (it, ii) {
+                if (!isObj(it)) return;
+                var path = ["s", String(si), "i", String(ii)];
+                var saved = current(S.content, path, {});
+                var item = el("div", "item");
+                var nameP = parts("t" in saved ? saved.t : it.t);
+                var descP = parts("d" in saved ? saved.d : it.d);
+
+                if (perm.mn) {
+                    var nAr = addTextInput(item, "اسم الطبق / المنتج (عربي)", nameP[0], false, false);
+                    var nEn = addTextInput(item, "Name (English)", nameP[1], false, true);
+                    var dAr = addTextInput(item, "الوصف (عربي)", descP[0], true, false);
+                    var dEn = addTextInput(item, "Description (English)", descP[1], true, true);
+                    S.collectors.push(function (out) {
+                        var name = bi(nAr.value, nEn.value);
+                        if (!name) throw new Error("القسم " + (si + 1) + ": اسم الطبق لا يمكن أن يكون فارغًا.");
+                        var o = {};
+                        if (!same(name, it.t || "")) o.t = name;
+                        var desc = bi(dAr.value, dEn.value);
+                        if (!same(desc, it.d || "")) o.d = desc;
+                        if (Object.keys(o).length) Object.assign(ensure(out, path), o);
+                    });
+                } else {
+                    item.appendChild(el("div", "name", nameP[0] || nameP[1]));
+                }
+
+                if (perm.mp) {
+                    var basePrice = typeof it.p === "string" ? it.p : "";
+                    var priceNow = "p" in saved ? String(saved.p || "") : basePrice;
+                    var price = addTextInput(item, "السعر", priceNow, false, true);
+                    price.maxLength = 40;
+                    var offNow = "off" in saved ? !!saved.off : !!it.off;
+                    var off = el("input");
+                    off.type = "checkbox";
+                    off.checked = offNow;
+                    var offRow = el("label", "check");
+                    offRow.appendChild(off);
+                    offRow.appendChild(document.createTextNode("نفد (غير متوفر)"));
+                    item.appendChild(offRow);
+                    S.collectors.push(function (out) {
+                        var o = {};
+                        var p = price.value.trim();
+                        if (p !== basePrice.trim()) o.p = p;
+                        if (off.checked !== !!it.off) o.off = off.checked ? 1 : 0;
+                        if (Object.keys(o).length) Object.assign(ensure(out, path), o);
+                    });
+                }
+                card.appendChild(item);
+            });
+            box.appendChild(card);
+        });
+    }
+
+    function buildForm() {
+        var box = $("form");
+        box.innerHTML = "";
+        S.collectors = [];
+        var p = S.perm;
+        if (!(p.n || p.tx || p.lk || p.la || p.mp || p.mn || p.mc)) {
+            var card = el("div", "card");
+            card.appendChild(el("p", "muted", "لا توجد حقول مسموح لك بتعديلها في هذه الصفحة. تواصل مع المسؤول."));
+            box.appendChild(card);
+            $("save").disabled = true;
+            return;
+        }
+        $("save").disabled = false;
+        buildCommon(box);
+        if (S.base.type === "menu") buildMenu(box); else buildLinks(box);
+    }
+
+    function collect() {
+        var out = {};
+        S.collectors.forEach(function (fn) { fn(out); });
+        return out;
+    }
+
+    /* ---------------------------------------------------------------- screens */
+    function showLogin() {
+        $("login").hidden = false;
+        $("app").hidden = true;
+        $("logout").hidden = true;
+    }
+
+    function openPage(id) {
+        say("جارٍ التحميل...");
+        var page = S.pages.filter(function (p) { return p.id === id; })[0];
+        if (!page) return;
+        loadBase(id).then(function (base) {
+            S.page = page; S.base = base; S.content = page.content || {}; S.perm = page.perm || {};
+            $("open").href = "index.html?id=" + encodeURIComponent(id);
+            if (base.x) {
+                $("form").innerHTML = "";
+                $("save").disabled = true;
+                say("هذه الصفحة غير متاحة حاليًا.", "err");
+                return;
+            }
+            buildForm();
+            say("");
+        }).catch(function (e) { say(e.message, "err"); });
+    }
+
+    function showApp() {
+        $("login").hidden = true;
+        $("app").hidden = false;
+        $("logout").hidden = false;
+        say("جارٍ التحميل...");
+        loadMyPages().then(function (pages) {
+            S.pages = pages;
+            if (!pages.length) {
+                $("form").innerHTML = "";
+                $("save").disabled = true;
+                say("لا توجد صفحة مرتبطة بحسابك.", "err");
+                return;
+            }
+            var pick = $("pick");
+            pick.innerHTML = "";
+            pages.forEach(function (p) {
+                var o = el("option", "", p.id);
+                o.value = p.id;
+                pick.appendChild(o);
+            });
+            $("pickWrap").hidden = pages.length < 2;
+            openPage(pages[0].id);
+        }).catch(function (e) { say(e.message, "err"); });
+    }
+
+    function doLogin() {
+        var user = $("user").value.trim().toLowerCase();
+        var pass = $("pass").value;
+        if (!/^[a-z0-9.]{3,40}$/.test(user)) { say("اسم المستخدم غير صالح.", "err"); return; }
+        if (!pass) { say("أدخل كلمة السر.", "err"); return; }
+        $("loginBtn").disabled = true;
+        say("جارٍ الدخول...");
+        signIn(user, pass).then(function () {
+            $("pass").value = "";
+            showApp();
+        }).catch(function (e) { say(e.message, "err"); })
+          .then(function () { $("loginBtn").disabled = false; });
+    }
+
+    function doSave() {
+        var content;
+        try { content = collect(); } catch (e) { say(e.message, "err"); return; }
+        if (JSON.stringify(content).length > 50000) { say("التغييرات كبيرة جدًا.", "err"); return; }
+        $("save").disabled = true;
+        say("جارٍ الحفظ...");
+        saveContent(S.page.id, content).then(function () {
+            S.content = content;
+            S.page.content = content;
+            say("تم الحفظ ✓ سيظهر التغيير في الصفحة خلال ثوانٍ.", "ok");
+        }).catch(function (e) { say(e.message, "err"); })
+          .then(function () { $("save").disabled = false; });
+    }
+
+    function doLogout() {
+        S.auth = null;
+        saveSession();
+        $("form").innerHTML = "";
+        say("");
+        showLogin();
+    }
+
+    /* ---------------------------------------------------------------- start */
+    $("loginBtn").addEventListener("click", doLogin);
+    $("pass").addEventListener("keydown", function (ev) { if (ev.key === "Enter") doLogin(); });
+    $("save").addEventListener("click", doSave);
+    $("logout").addEventListener("click", doLogout);
+    $("pick").addEventListener("change", function () { openPage($("pick").value); });
+
+    if (!configured()) {
+        say("لم يتم إعداد Firebase بعد (ملف firebase-config.js).", "err");
+    } else {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) { saved = null; }
+        if (saved && saved.r && saved.u) {
+            refreshSession(saved.r, saved.u).then(showApp, function () { showLogin(); });
+        } else {
+            showLogin();
+        }
+    }
+})();
+</script>
+</body>
+</html>
